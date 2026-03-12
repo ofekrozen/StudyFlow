@@ -1,0 +1,64 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  user_id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique
+  auth_provider String
+  created_at    DateTime @default(now())
+
+  // A user can have many courses
+  courses Course[]
+}
+
+model Course {
+  course_id      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  course_name    String
+  semester_start DateTime @db.Date
+  semester_end   DateTime @db.Date
+  exam_date      DateTime @db.Date
+
+  // Foreign Key linking back to the User
+  user_id String @db.Uuid
+  user    User   @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  // TODO: Add relations for Syllabus and Lecture_Schedule here
+  syllabus          Syllabus?
+  lecture_schedules Lecture_Schedule[]
+}
+
+// TODO: Create the Syllabus model 
+model Syllabus {
+  syllabus_id String @id @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  course_id   String @unique @db.Uuid
+  file_url    String
+  parsed_text String @db.Text
+
+  course Course @relation(fields: [course_id], references: [course_id], onDelete: Cascade)
+}
+
+// TODO: Create the Lecture_Schedule model
+model Lecture_Schedule {
+  schedule_id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  day_of_week Int // 1 for Sunday, 2 for Monday, etc.
+  start_time  String // Storing as "14:00" is often easier for UI components than full DateTimes
+  end_time    String
+
+  // The Foreign Key
+  course_id String @db.Uuid // Notice there is no @unique here!
+
+  // The Relation Definition
+  course Course @relation(fields: [course_id], references: [course_id], onDelete: Cascade)
+}
