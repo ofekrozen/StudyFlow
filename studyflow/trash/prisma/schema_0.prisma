@@ -5,7 +5,7 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../app/generated/prisma"
 }
 
@@ -57,7 +57,7 @@ model Lecture_Schedule {
   end_time    String
 
   // The Foreign Key
-  course_id String @db.Uuid // Notice there is no @unique here!
+  course_id String @db.Uuid
 
   // The Relation Definition
   course Course @relation(fields: [course_id], references: [course_id], onDelete: Cascade)
