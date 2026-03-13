@@ -49,3 +49,4 @@ next-env.d.ts
 
 # files
 supabase_local_db_inst.txt
+.trash
