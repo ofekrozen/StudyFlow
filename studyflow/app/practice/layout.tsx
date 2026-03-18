@@ -1,20 +1,23 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import { logoutAction } from "@/app/actions/auth";
 
 export const metadata: Metadata = {
-  title: "Dashboard - StudyFlow",
-  description: "Your daily study flow and tasks",
+  title: "Practice - StudyFlow",
+  description: "Practice your courses with AI-powered tools",
 };
 
-export default async function DashboardLayout({
+export default async function PracticeLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const initials = user?.email ? user.email[0].toUpperCase() : "U";
+  if (!user) redirect("/login");
+
+  const initials = user.email ? user.email[0].toUpperCase() : "U";
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0a0a0a]">
@@ -42,9 +45,9 @@ export default async function DashboardLayout({
               <span className="absolute right-2 top-2 flex h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-black"></span>
             </button>
 
-            {/* User menu — shows email initial and sign-out */}
+            {/* User menu */}
             <div className="flex items-center gap-2">
-              {user?.email && (
+              {user.email && (
                 <span className="hidden text-xs text-gray-500 dark:text-gray-400 sm:block">
                   {user.email}
                 </span>
