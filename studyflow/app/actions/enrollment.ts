@@ -52,7 +52,7 @@ export async function enrollAction(formData: FormData) {
     resolvedProfessorId = newProf!.professor_id
   }
 
-  if (!resolvedCourseId || !resolvedProfessorId) {
+  if (!resolvedCourseId) {
     redirect('/onboarding/basics?error=missing_data')
   }
 
