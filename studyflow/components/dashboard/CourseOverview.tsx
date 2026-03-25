@@ -201,7 +201,7 @@ export default function CourseOverview({ enrolledCourses, semesters, institution
                       Analytics
                     </button>
                     <Link
-                      href="/practice"
+                      href={`/practice/${course.enrollment_id}`}
                       className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition-all hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/25 active:scale-[0.98]"
                     >
                       Practice
