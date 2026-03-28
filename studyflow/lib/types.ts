@@ -80,6 +80,34 @@ export interface CourseSubject {
   deleted_at: string | null
 }
 
+export interface SocraticTutorSession {
+  session_id: string
+  enrollment_id: string
+  subject_id: string
+  session_date: string | null
+  ai_questions: unknown[] | null
+  user_answers: unknown[] | null
+  ai_feedback: unknown[] | null
+  ai_score: number | null
+  weak_points: unknown[]
+  hints_given: number
+  questions_count: number
+  session_status: 'pending' | 'in_progress' | 'completed'
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+
+export interface SubjectMastery {
+  mastery_id: string
+  enrollment_id: string
+  subject_id: string
+  mastery_score: number
+  decay_rate: number
+  last_practiced_at: string | null
+  next_review_at: string | null
+}
+
 // Flat shape returned by the enrolled-courses JOIN query on the dashboard
 export interface EnrolledCourse {
   enrollment_id: string

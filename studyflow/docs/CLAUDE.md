@@ -117,9 +117,21 @@ Course_Professor_Exams (course_professor_exam_id PK, course_professor_id FK,
 
 ```sql
 Socratic_Tutor_Sessions (session_id PK, enrollment_id FK, subject_id FK,
-                          session_date, ai_questions, user_answers,
-                          ai_feedback, ai_score INT,
+                          session_date,
+                          ai_questions JSONB, user_answers JSONB, ai_feedback JSONB,
+                          ai_score INT,
+                          weak_points JSONB DEFAULT '[]',
+                          hints_given INT DEFAULT 0,
+                          questions_count INT DEFAULT 5,
                           session_status ENUM['pending','in_progress','completed'])
+
+Subject_Mastery (mastery_id PK, enrollment_id FK, subject_id FK,
+                 mastery_score INT DEFAULT 0 CHECK(0–100),
+                 decay_rate FLOAT DEFAULT 0.230,
+                 last_practiced_at TIMESTAMPTZ, next_review_at TIMESTAMPTZ,
+                 UNIQUE(enrollment_id, subject_id))
+-- Indexes: idx_subject_mastery_enrollment (enrollment_id),
+--          idx_subject_mastery_review (next_review_at) WHERE NOT NULL
 
 Pending_Tasks (task_id PK, enrollment_id FK,
                task_type ENUM['upload_notes','daily_review','concept_check'],

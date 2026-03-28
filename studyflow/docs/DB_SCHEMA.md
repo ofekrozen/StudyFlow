@@ -122,14 +122,28 @@
 - `enrollment_id` (UUID, Foreign Key)
 - `subject_id` (UUID, Foreign Key)
 - `session_date` (Timestamp)
-- `ai_questions` (Text)
-- `user_answers` (Text)
-- `ai_feedback` (Text)
+- `ai_questions` (JSONB)
+- `user_answers` (JSONB)
+- `ai_feedback` (JSONB)
 - `ai_score` (Integer)
+- `weak_points` (JSONB, Default: [])
+- `hints_given` (Integer, Default: 0)
+- `questions_count` (Integer, Default: 5)
 - `session_status` (Enum: 'pending', 'in_progress', 'completed')
 - `created_at` (Timestamp)
 - `updated_at` (Timestamp)
 - `deleted_at` (Timestamp)
+
+- **Subject_Mastery Table:**
+- `mastery_id` (UUID, Primary Key)
+- `enrollment_id` (UUID, Foreign Key)
+- `subject_id` (UUID, Foreign Key)
+- `mastery_score` (Integer, Default: 0, CHECK 0–100)
+- `decay_rate` (Float, Default: 0.230)
+- `last_practiced_at` (Timestamp)
+- `next_review_at` (Timestamp)
+- UNIQUE(enrollment_id, subject_id)
+- Indexes: `idx_subject_mastery_enrollment` on enrollment_id; `idx_subject_mastery_review` on next_review_at WHERE NOT NULL
 
 - **Subscriptions Table:**
 - `subscription_id` (UUID, Primary Key)
