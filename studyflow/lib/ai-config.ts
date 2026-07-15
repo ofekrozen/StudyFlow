@@ -1,0 +1,13 @@
+export const AI_MODELS = {
+  QUESTION_GENERATION: 'gpt-4o',
+  ANSWER_ANALYSIS: 'gpt-4o',
+  HINT_GENERATION: 'gpt-4o',
+  FEEDBACK_GENERATION: 'gpt-4o',
+} as const
+
+export const AI_TEMPERATURES = {
+  QUESTION_GENERATION: 0.7,
+  ANSWER_ANALYSIS: 0.3,
+  HINT_GENERATION: 0.7,
+  FEEDBACK_GENERATION: 0.3,
+} as const
