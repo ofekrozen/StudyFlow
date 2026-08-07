@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { openai } from '@/lib/openai'
-import { AI_MODELS, AI_TEMPERATURES } from '@/lib/ai-config'
-import { fetchRAGContext } from '@/lib/rag'
+import { AI_MODELS, AI_TEMPERATURES, RAG_MATCH_COUNTS } from '@/lib/ai-config'
+import { fetchRAGContext, formatRagChunksForPrompt } from '@/lib/rag'
 
 interface HintBody {
   session_id: string
@@ -86,12 +86,28 @@ export async function POST(request: NextRequest) {
 
     const subjectName = subject?.subject_name ?? 'this subject'
 
-    // Fetch RAG content
-    const ragContent = await fetchRAGContext(supabase, session.enrollment_id)
+    // Fetch course_id for retrieval scoping.
+    const { data: enrollment } = await supabase
+      .from('course_enrollment')
+      .select('course_id')
+      .eq('enrollment_id', session.enrollment_id)
+      .single()
 
-    const ragSection = ragContent
-      ? `Relevant course material:\n---\n${ragContent}\n---`
-      : `No course materials have been uploaded yet. Use your general academic knowledge about "${subjectName}".`
+    // Retrieve material relevant to the question the student is stuck on.
+    const ragChunks = enrollment?.course_id
+      ? await fetchRAGContext(
+          supabase,
+          enrollment.course_id,
+          session.enrollment_id,
+          question.question,
+          { matchCount: RAG_MATCH_COUNTS.HINT }
+        )
+      : []
+
+    const ragSection =
+      ragChunks.length > 0
+        ? `Relevant course material:\n---\n${formatRagChunksForPrompt(ragChunks)}\n---`
+        : `No course materials have been uploaded yet. Use your general academic knowledge about "${subjectName}".`
 
     const systemPrompt = [
       `You are a Socratic tutor providing a hint to a student who is stuck.`,
@@ -128,7 +144,8 @@ export async function POST(request: NextRequest) {
                 material_ref: {
                   type: ['string', 'null'],
                   description:
-                    'A short reference to a specific course topic or principle that is relevant, or null if not applicable.',
+                    'A short reference to a specific course topic or principle the student should review, ' +
+                    'ideally naming one of the labeled sources shown in the material, or null if not applicable.',
                 },
                 move_on: {
                   type: 'boolean',

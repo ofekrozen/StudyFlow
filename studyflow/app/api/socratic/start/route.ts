@@ -1,44 +1,31 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { openai } from '@/lib/openai'
-import { AI_MODELS, AI_TEMPERATURES } from '@/lib/ai-config'
-import { fetchRAGContext } from '@/lib/rag'
+import { AI_MODELS, AI_TEMPERATURES, RAG_MATCH_COUNTS } from '@/lib/ai-config'
+import { fetchRAGContext, formatRagChunksForPrompt, type RagChunk } from '@/lib/rag'
+import {
+  buildKnowledgeProfile,
+  difficultyGuidance,
+  type KnowledgeProfile,
+} from '@/app/api/socratic/utils/knowledgeProfile'
 
 interface StartBody {
   enrollment_id: string
   subject_id: string
 }
 
-interface PastSession {
-  ai_score: number | null
-  weak_points: unknown[]
-  session_date: string | null
-}
-
-function buildSessionHistory(sessions: PastSession[]): string {
-  if (sessions.length === 0) return ''
-
-  const lines = sessions.map((s) => {
-    const daysAgo = s.session_date
-      ? Math.round((Date.now() - new Date(s.session_date).getTime()) / (1000 * 60 * 60 * 24))
-      : null
-    const when = daysAgo !== null ? `${daysAgo} day${daysAgo === 1 ? '' : 's'} ago` : 'previously'
-    const score = s.ai_score !== null ? `score ${s.ai_score}` : 'score unknown'
-    const wp = Array.isArray(s.weak_points) && s.weak_points.length > 0
-      ? `, weak points: [${(s.weak_points as string[]).join(', ')}]`
-      : ''
-    return `- ${when}: ${score}${wp}`
-  })
-
-  return `Session history for this subject (most recent first):\n${lines.join('\n')}`
+interface PastAiQuestion {
+  question?: string
+  type?: string
 }
 
 function buildSystemPrompt(
   courseName: string,
   subjectName: string,
   subjectDescription: string | null,
-  ragContent: string,
-  sessionHistory: string
+  ragChunks: RagChunk[],
+  profile: KnowledgeProfile,
+  priorQuestions: string[]
 ): string {
   const parts: string[] = [
     `You are a Socratic tutor for the course "${courseName}", subject: "${subjectName}".`,
@@ -48,28 +35,44 @@ function buildSystemPrompt(
     parts.push(`Subject description: ${subjectDescription}`)
   }
 
-  if (ragContent) {
-    parts.push(`The following course material is available for context:\n---\n${ragContent}\n---`)
+  if (ragChunks.length > 0) {
+    parts.push(
+      `The following course material is available for context:\n---\n${formatRagChunksForPrompt(ragChunks)}\n---`
+    )
   } else {
     parts.push(
       `No course materials have been uploaded yet. Use your general academic knowledge about "${subjectName}" in the context of "${courseName}".`
     )
   }
 
-  if (sessionHistory) {
-    parts.push(sessionHistory)
+  if (profile.sessionHistorySummary) {
+    parts.push(profile.sessionHistorySummary)
+  }
+
+  if (profile.recurringWeakPoints.length > 0) {
+    const labels = profile.recurringWeakPoints.map((w) => w.label).join(', ')
+    parts.push(
+      `The student has repeatedly struggled with these concepts across past sessions (prioritize probing them): [${labels}].`
+    )
+  }
+
+  if (priorQuestions.length > 0) {
+    const list = priorQuestions.map((q) => `- ${q}`).join('\n')
+    parts.push(`Do not repeat or closely rephrase these previously-asked opening questions:\n${list}`)
   }
 
   parts.push(
     `IMPORTANT: Only ask about concepts covered in the provided course materials. ` +
-    `If no materials are provided, restrict your questions to topics that clearly fall ` +
-    `under the subject name and description. Do not introduce external concepts, ` +
-    `terminology, or frameworks that the student may not have encountered in this course.`,
+      `If no materials are provided, restrict your questions to topics that clearly fall ` +
+      `under the subject name and description. Do not introduce external concepts, ` +
+      `terminology, or frameworks that the student may not have encountered in this course.`,
+    difficultyGuidance(profile.difficultyBand),
     `Rules:`,
     `- Ask ONE open-ended question to begin assessing the student's understanding.`,
+    `- Ground the question in a SPECIFIC concept, example, term, or detail from the material above — ` +
+      `do NOT use generic phrasing like "explain the core principle" or "describe this topic in your own words."`,
     `- Never give away answers, definitions, or solutions.`,
     `- The question must require the student to explain, reason, or apply a concept — not recall a fact.`,
-    `- If prior session history exists, prioritize probing concepts the student has repeatedly struggled with.`,
     `- The question should be answerable in 2-4 sentences by a student who understands the material.`
   )
 
@@ -124,28 +127,41 @@ export async function POST(request: NextRequest) {
 
     const courseName = course?.course_name ?? 'this course'
 
-    // Fetch last 5 completed sessions for cross-session context
-    const { data: pastSessions } = await supabase
+    // Assemble what we know about the student's understanding of this subject.
+    const profile = await buildKnowledgeProfile(supabase, enrollment_id, subject_id)
+
+    // Pull the opening questions of recent sessions so we don't repeat them.
+    const { data: recentSessions } = await supabase
       .from('socratic_tutor_sessions')
-      .select('ai_score, weak_points, session_date')
+      .select('ai_questions')
       .eq('enrollment_id', enrollment_id)
       .eq('subject_id', subject_id)
       .eq('session_status', 'completed')
       .order('session_date', { ascending: false })
-      .limit(5)
+      .limit(3)
 
-    const sessionHistory = buildSessionHistory((pastSessions ?? []) as PastSession[])
+    const priorQuestions = (recentSessions ?? [])
+      .map((s) => {
+        const questions = (s.ai_questions ?? []) as PastAiQuestion[]
+        const initial = questions.find((q) => q.type === 'initial') ?? questions[0]
+        return initial?.question
+      })
+      .filter((q): q is string => Boolean(q))
 
-    // Fetch RAG content
-    const ragContent = await fetchRAGContext(supabase, enrollment_id)
+    // Retrieve material relevant to the subject to ground the opening question.
+    const ragQuery = `${subject.subject_name} ${subject.subject_description ?? ''}`.trim()
+    const ragChunks = await fetchRAGContext(supabase, enrollment.course_id, enrollment_id, ragQuery, {
+      matchCount: RAG_MATCH_COUNTS.START,
+    })
 
     // Build system prompt
     const systemPrompt = buildSystemPrompt(
       courseName,
       subject.subject_name,
       subject.subject_description,
-      ragContent,
-      sessionHistory
+      ragChunks,
+      profile,
+      priorQuestions
     )
 
     // Call GPT-4o to generate the opening question
@@ -197,6 +213,7 @@ export async function POST(request: NextRequest) {
         ai_feedback: [],
         weak_points: [],
         hints_given: 0,
+        covered_chunk_ids: ragChunks.map((c) => c.chunk_id),
         session_status: 'in_progress',
       })
       .select('session_id')

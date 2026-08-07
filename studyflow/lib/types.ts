@@ -92,6 +92,7 @@ export interface SocraticTutorSession {
   weak_points: unknown[]
   hints_given: number
   questions_count: number
+  covered_chunk_ids: unknown[]
   session_status: 'pending' | 'in_progress' | 'completed'
   created_at: string
   updated_at: string

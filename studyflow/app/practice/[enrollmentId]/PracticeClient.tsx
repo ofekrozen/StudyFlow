@@ -87,7 +87,7 @@ export default function PracticeClient({ enrollmentId, courseName, subjects, has
 
       {/* Tab Content */}
       <div className="px-0">
-        {activeTab === "socratic" && <SocraticTab subjects={subjects} />}
+        {activeTab === "socratic" && <SocraticTab subjects={subjects} enrollmentId={enrollmentId} />}
         {activeTab === "homework" && <HomeworkTab />}
         {activeTab === "questions" && <PracticeQuestionsTab subjects={subjects} hasExams={hasExams} />}
       </div>

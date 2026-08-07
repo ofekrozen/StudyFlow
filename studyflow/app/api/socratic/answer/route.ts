@@ -1,8 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { openai } from '@/lib/openai'
-import { AI_MODELS, AI_TEMPERATURES } from '@/lib/ai-config'
+import { AI_MODELS, AI_TEMPERATURES, RAG_MATCH_COUNTS } from '@/lib/ai-config'
 import { getDecayRate } from '@/app/api/socratic/utils/battery'
+import { fetchRAGContext, formatRagChunksForPrompt } from '@/lib/rag'
+import {
+  buildKnowledgeProfile,
+  difficultyGuidance,
+} from '@/app/api/socratic/utils/knowledgeProfile'
+
+// Hard ceiling on questions per session (adaptive early completion still allowed).
+const MAX_QUESTIONS = 5
 
 // ── JSONB item types ──────────────────────────────────────────────────────────
 
@@ -303,19 +311,45 @@ export async function POST(request: NextRequest) {
 
     const subjectName = subject?.subject_name ?? 'this subject'
 
+    // Retrieve material relevant to what the student just said, excluding chunks
+    // already surfaced this session so follow-ups explore fresh ground.
+    const coveredChunkIds = (session.covered_chunk_ids ?? []) as string[]
+    const latestQuestion = questions[currentIndex]?.question ?? ''
+    const ragQuery = `${latestQuestion}\n${answer_text}`.trim()
+    const ragChunks = enrollment?.course_id
+      ? await fetchRAGContext(supabase, enrollment.course_id, session.enrollment_id, ragQuery, {
+          matchCount: RAG_MATCH_COUNTS.ANSWER,
+          excludeChunkIds: coveredChunkIds,
+        })
+      : []
+
+    // Calibrate difficulty from what we know about the student's mastery here.
+    const profile = await buildKnowledgeProfile(supabase, session.enrollment_id, session.subject_id)
+
+    const materialSection =
+      ragChunks.length > 0
+        ? `Relevant course material (ground the next question in a specific detail from here):\n---\n${formatRagChunksForPrompt(ragChunks)}\n---`
+        : `No course materials are available. Restrict the next question to topics that clearly fall under the subject name.`
+
+    const askedQuestions = questions.map((q) => `- ${q.question}`).join('\n')
+
     const systemPrompt = [
       `You are a Socratic tutor evaluating a student's response in an active tutoring session.`,
       `Course: "${courseName}", Subject: "${subjectName}".`,
       `Conversation so far:\n${conversationHistory}`,
+      materialSection,
       `IMPORTANT: Only ask about concepts covered in the provided course materials. ` +
       `If no materials are provided, restrict your questions to topics that clearly fall ` +
       `under the subject name and description. Do not introduce external concepts, ` +
       `terminology, or frameworks that the student may not have encountered in this course.`,
+      difficultyGuidance(profile.difficultyBand),
+      `Already-asked questions — do NOT repeat or closely rephrase any of these:\n${askedQuestions}`,
       `Rules:\n` +
       `- Never reveal the correct answer, even when providing feedback.\n` +
-      `- NEXT_QUESTION: the answer shows reasonable understanding; move to a new angle or topic within the subject.\n` +
+      `- Ground any follow-up question in a SPECIFIC concept, example, or detail from the material above — avoid generic phrasing.\n` +
+      `- NEXT_QUESTION: the answer shows reasonable understanding; move to a new angle or concept within the subject.\n` +
       `- DIG_DEEPER: the answer is vague, partially correct, or reveals a gap — probe further on the same point.\n` +
-      `- COMPLETE: at least 5 exchanges have occurred AND the student has demonstrated sufficient overall understanding, OR the student has clearly exhausted meaningful engagement.\n` +
+      `- COMPLETE: at least 3 exchanges have occurred AND the student has demonstrated sufficient overall understanding, OR the student has clearly exhausted meaningful engagement.\n` +
       `- When generating a follow-up question, guide through reasoning — never state the correct concept.`,
     ].join('\n\n')
 
@@ -339,16 +373,16 @@ export async function POST(request: NextRequest) {
                     'NEXT_QUESTION: answer acceptable, new angle. DIG_DEEPER: answer incomplete, probe further. COMPLETE: sufficient questions asked and understanding demonstrated.',
                 },
                 next_question: {
-                  type: 'string',
+                  type: ['string', 'null'],
                   description:
-                    'Required when action is NEXT_QUESTION or DIG_DEEPER. The follow-up Socratic question.',
+                    'The follow-up Socratic question when action is NEXT_QUESTION or DIG_DEEPER; null when action is COMPLETE.',
                 },
                 reason: {
                   type: 'string',
                   description: 'Internal reasoning for the chosen action. Not shown to student.',
                 },
               },
-              required: ['action', 'reason'],
+              required: ['action', 'next_question', 'reason'],
               additionalProperties: false,
             },
             strict: true,
@@ -371,6 +405,14 @@ export async function POST(request: NextRequest) {
         action: 'DIG_DEEPER',
         next_question: parsed.next_question ?? 'Can you elaborate further on that?',
         reason: parsed.reason,
+      }
+    }
+
+    // Hard ceiling: force completion once MAX_QUESTIONS answers are in.
+    if (parsed.action !== 'COMPLETE' && updatedAnswers.length >= MAX_QUESTIONS) {
+      parsed = {
+        action: 'COMPLETE',
+        reason: `Reached the ${MAX_QUESTIONS}-question ceiling for this session.`,
       }
     }
 
@@ -412,6 +454,7 @@ export async function POST(request: NextRequest) {
         user_answers: updatedAnswers,
         ai_questions: updatedQuestions,
         ai_feedback: updatedFeedback,
+        covered_chunk_ids: [...coveredChunkIds, ...ragChunks.map((c) => c.chunk_id)],
       })
       .eq('session_id', session_id)
 
